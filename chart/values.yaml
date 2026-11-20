@@ -80,3 +80,10 @@ autoscaling:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+config:
+  appEnv: poc
+  logLevel: info
+
+secret:
+  appSecretKey: poc-placeholder
