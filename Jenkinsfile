@@ -8,18 +8,15 @@ pipeline {
     SONAR_HOST = 'http://sonarqube:9000'
     PROJECT    = 'poc-k8s-app'
     KUBECONFIG = '/root/.kube/config'
+    HOST_WS    = "/srv/jenkins/workspace/${env.JOB_NAME}"
   }
 
   stages {
-    stage('Checkout') {
-      steps { checkout scm }
-    }
-
     stage('Testes') {
       steps {
         sh '''
-          docker run --rm -v "$PWD":/src -w /src python:3.12-slim \
-            sh -c "pip install -q -r app/requirements-dev.txt && cd app && python -m pytest -q"
+          docker run --rm -v "$HOST_WS":/src -w /src python:3.12-slim \
+            sh -c "test -f app/requirements-dev.txt && pip install -q -r app/requirements-dev.txt && cd app && python -m pytest -q"
         '''
       }
     }
@@ -28,7 +25,7 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
-            docker run --rm --network kind -v "$PWD":/usr/src -w /usr/src \
+            docker run --rm --network kind -v "$HOST_WS":/usr/src -w /usr/src \
               -e SONAR_HOST_URL=$SONAR_HOST \
               -e SONAR_TOKEN=$SONAR_TOKEN \
               sonarsource/sonar-scanner-cli \
