@@ -9,17 +9,19 @@ pipeline {
   }
 
   environment {
-    REGISTRY        = 'localhost:5001'
-    IMAGE_NAME      = 'poc-k8s-app'
-    IMAGE_TAG       = "${BUILD_NUMBER}"
-    NAMESPACE       = 'poc-k8s'
-    RELEASE_NAME    = 'poc-k8s-app'
-    CHART_DIR       = 'chart'
-    SONAR_HOST      = 'http://sonarqube:9000'
-    SONAR_PROJECT   = 'poc-k8s-app'
-    SCANNER_IMAGE   = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
-    TRIVY_EXIT_CODE = '1'
-    KUBECONFIG      = '/root/.kube/config'
+    REGISTRY              = 'localhost:5001'
+    IMAGE_NAME            = 'poc-k8s-app'
+    IMAGE_TAG             = "${BUILD_NUMBER}"
+    NAMESPACE             = 'poc-k8s'
+    RELEASE_NAME          = 'poc-k8s-app'
+    CHART_DIR             = 'chart'
+    SONAR_HOST            = 'http://sonarqube:9000'
+    SONAR_PROJECT         = 'poc-k8s-app'
+    SCANNER_IMAGE         = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
+    TRIVY_IMAGE           = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb'
+    TRIVY_EXIT_CODE       = '0'
+    QG_REQUIRE_CONDITIONS = 'true'
+    KUBECONFIG            = '/root/.kube/config'
   }
 
   stages {
@@ -88,7 +90,8 @@ pipeline {
                 -Dsonar.exclusions=app/tests/**,**/__pycache__/**,**/*.pyc,app/coverage.xml,app/test-results.xml \
                 -Dsonar.python.version=3.12 \
                 -Dsonar.python.coverage.reportPaths=app/coverage.xml \
-                -Dsonar.python.xunit.reportPath=app/test-results.xml
+                -Dsonar.python.xunit.reportPath=app/test-results.xml \
+                -Dsonar.python.xunit.skipDetails=true
           '''
         }
       }
@@ -103,8 +106,16 @@ pipeline {
               RESP=$(curl -s -u "${SONAR_TOKEN}:" \
                 "${SONAR_HOST}/api/qualitygates/project_status?projectKey=${SONAR_PROJECT}")
               STATUS=$(printf '%s' "$RESP" | grep -o '"status":"[A-Z]*"' | head -1 | cut -d'"' -f4)
-              echo "tentativa ${i}: status=${STATUS:-sem-resposta}"
+              COND_COUNT=$(printf '%s' "$RESP" | grep -o '"metricKey"' | wc -l)
+              echo "tentativa ${i}: status=${STATUS:-sem-resposta} condicoes=${COND_COUNT}"
               if [ "$STATUS" = "OK" ]; then
+                if [ "$COND_COUNT" -eq 0 ]; then
+                  echo "AVISO: gate aprovado sem nenhuma condicao avaliada (OK vazio)"
+                  if [ "${QG_REQUIRE_CONDITIONS}" = "true" ]; then
+                    echo "ERRO: QG_REQUIRE_CONDITIONS=true e o gate nao tem condicoes"
+                    exit 1
+                  fi
+                fi
                 echo "Quality Gate aprovado"
                 exit 0
               fi
@@ -155,13 +166,16 @@ pipeline {
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${HOST_WS}:/work" -w /work \
-            aquasec/trivy:latest image \
+            "${TRIVY_IMAGE}" image \
               --severity HIGH,CRITICAL \
               --ignore-unfixed \
+              --timeout 10m \
               --format table \
               --output trivy-report.txt \
               --exit-code "${TRIVY_EXIT_CODE}" \
               "$IMAGE"
+          echo "--- resumo do trivy ---"
+          sed -n '1,40p' trivy-report.txt || true
         '''
       }
       post {
@@ -221,7 +235,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'app/coverage.xml, app/test-results.xml',
+      archiveArtifacts artifacts: 'app/coverage.xml, app/test-results.xml, trivy-report.txt',
                        allowEmptyArchive: true
       echo "build ${BUILD_NUMBER} finalizado com status ${currentBuild.currentResult}"
     }
