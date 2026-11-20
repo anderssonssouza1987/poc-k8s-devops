@@ -1,0 +1,3 @@
+# CVEs aceitas conscientemente neste POC.
+# Formato: uma por linha, com justificativa no comentario acima.
+# Preencher apos a primeira execucao do stage Trivy.

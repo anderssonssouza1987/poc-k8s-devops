@@ -9,7 +9,7 @@ pipeline {
   }
 
   environment {
-    REGISTRY              = 'localhost:5001'
+    REGISTRY              = 'nexus:5001'
     IMAGE_NAME            = 'poc-k8s-app'
     IMAGE_TAG             = "${BUILD_NUMBER}"
     NAMESPACE             = 'poc-k8s'
@@ -19,7 +19,7 @@ pipeline {
     SONAR_PROJECT         = 'poc-k8s-app'
     SCANNER_IMAGE         = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
     TRIVY_IMAGE           = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb'
-    TRIVY_EXIT_CODE       = '0'
+    TRIVY_EXIT_CODE       = '1'
     QG_REQUIRE_CONDITIONS = 'true'
     KUBECONFIG            = '/root/.kube/config'
   }
@@ -148,10 +148,8 @@ pipeline {
               --label "org.opencontainers.image.revision=${GIT_SHA}" \
               --label "org.opencontainers.image.version=${IMAGE_TAG}" \
               -t "$IMAGE" \
-              -t "${REGISTRY}/${IMAGE_NAME}:latest" \
               "${WS}"
             docker push "$IMAGE"
-            docker push "${REGISTRY}/${IMAGE_NAME}:latest"
             docker logout "$REGISTRY"
           '''
         }
@@ -169,6 +167,7 @@ pipeline {
             "${TRIVY_IMAGE}" image \
               --severity HIGH,CRITICAL \
               --ignore-unfixed \
+              --ignorefile /work/.trivyignore \
               --timeout 10m \
               --format table \
               --output trivy-report.txt \
@@ -182,6 +181,31 @@ pipeline {
         always {
           archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: true
         }
+      }
+    }
+
+    stage('Politica') {
+      steps {
+        sh '''
+          set -eu
+          kubectl apply -f policies/disallow-latest-tag.yaml
+          for i in $(seq 1 24); do
+            if kubectl -n "${NAMESPACE}" run policy-probe --image=nginx:latest \
+                 --dry-run=server -o yaml >/tmp/probe.out 2>/tmp/probe.err; then
+              echo "tentativa ${i}: politica ainda nao bloqueou"
+              sleep 5
+            else
+              echo "ok: :latest negado pelo admission"
+              sed -n '1,6p' /tmp/probe.err
+              kubectl -n "${NAMESPACE}" run policy-probe-ok --image=nginx:1.27.3 \
+                --dry-run=server -o yaml >/dev/null
+              echo "ok: tag imutavel aceita"
+              exit 0
+            fi
+          done
+          echo "ERRO: politica nao bloqueou :latest em 120s"
+          exit 1
+        '''
       }
     }
 

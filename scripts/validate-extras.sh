@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -uo pipefail
 NS=observability
-fail=0; total=0; pends=0
-ok(){ total=$((total+1)); printf '  [APROVADO]  %s\n' "$1"; }
-no(){ total=$((total+1)); fail=$((fail+1)); printf '  [REPROVADO] %s\n' "$1"; }
-pd(){ total=$((total+1)); pends=$((pends+1)); printf '  [PENDENTE]  %s\n' "$1"; }
+APP=poc-k8s
+okc=0; noc=0; pdc=0
+ok(){ printf '  [APROVADO]  %s\n' "$1"; okc=$((okc+1)); }
+no(){ printf '  [REPROVADO] %s\n' "$1"; noc=$((noc+1)); }
+pd(){ printf '  [PENDENTE]  %s\n' "$1"; pdc=$((pdc+1)); }
 
 echo "== Loki =="
 kubectl -n $NS get sts loki -o jsonpath='{.status.readyReplicas}' 2>/dev/null | grep -q 1 \
@@ -12,35 +13,45 @@ kubectl -n $NS get sts loki -o jsonpath='{.status.readyReplicas}' 2>/dev/null | 
 
 kubectl -n $NS port-forward svc/loki 3100:3100 >/tmp/pf-loki.log 2>&1 &
 PF=$!; sleep 6
-code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ready || echo 000)
-[ "$code" = "200" ] && ok "loki /ready 200" || no "loki /ready $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ready || true)
 kill "$PF" 2>/dev/null; wait "$PF" 2>/dev/null
+[ "$code" = "200" ] && ok "loki /ready 200" || no "loki /ready HTTP ${code:-sem-resposta}"
 
 echo "== Promtail =="
-want=$(kubectl get nodes --no-headers | wc -l)
-got=$(kubectl -n $NS get ds promtail -o jsonpath='{.status.numberReady}' 2>/dev/null)
-[ "${got:-0}" = "$want" ] && ok "promtail $got/$want nodes" || no "promtail ${got:-0}/$want nodes"
+nodes=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+ready=$(kubectl -n $NS get ds promtail -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)
+[ "${ready:-0}" -ge "$nodes" ] && [ "$nodes" -gt 0 ] \
+  && ok "promtail ${ready}/${nodes} nodes" || no "promtail ${ready:-0}/${nodes} nodes"
 
 echo "== Grafana security =="
-GPOD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=grafana \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-uid=$(kubectl -n $NS exec "$GPOD" -c grafana -- id -u 2>/dev/null)
-[ "$uid" = "10001" ] && ok "grafana uid efetivo 10001" || no "grafana uid efetivo ${uid:-vazio}"
+POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+uid=$(kubectl -n $NS exec "$POD" -c grafana -- id -u 2>/dev/null | tr -d '\r\n')
+[ "$uid" = "10001" ] && ok "grafana uid efetivo 10001" || no "grafana uid efetivo ${uid:-desconhecido}"
 
-ro=$(kubectl -n $NS get deploy kube-prom-grafana \
+rofs=$(kubectl -n $NS get deploy kube-prom-grafana \
   -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].securityContext.readOnlyRootFilesystem}' 2>/dev/null)
-[ "$ro" = "true" ] && ok "grafana readOnlyRootFilesystem=true" || no "grafana readOnlyRootFilesystem=${ro:-vazio}"
+[ "$rofs" = "true" ] && ok "grafana readOnlyRootFilesystem=true" || no "grafana readOnlyRootFilesystem=${rofs:-ausente}"
 
 ds=$(kubectl -n $NS get cm kube-prom-kube-prometheus-grafana-datasource \
   -o jsonpath='{.data}' 2>/dev/null | grep -c 'loki.observability' || true)
 [ "${ds:-0}" -ge 1 ] && ok "datasource Loki provisionado" || no "datasource Loki ausente"
 
 echo "== Servicos auxiliares =="
-for s in nexus jenkins sonarqube; do
-  ns=$(kubectl get svc -A -o jsonpath="{range .items[?(@.metadata.name=='$s')]}{.metadata.namespace}{'\n'}{end}" 2>/dev/null | head -1)
-  [ -n "$ns" ] && ok "svc $s em $ns" || pd "svc $s nao deployado"
+for c in nexus jenkins sonarqube; do
+  st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo ausente)
+  [ "$st" = "running" ] && ok "container $c running" || no "container $c $st"
 done
 
+echo "== Politica Kyverno =="
+kubectl get validatingpolicy disallow-latest-tag >/dev/null 2>&1 \
+  && ok "ValidatingPolicy disallow-latest-tag aplicada" || no "ValidatingPolicy ausente"
+
+if kubectl -n $APP run policy-probe --image=nginx:latest --dry-run=server -o yaml >/dev/null 2>&1; then
+  no "politica nao bloqueou :latest"
+else
+  ok "politica bloqueia :latest"
+fi
+
 echo
-echo "Resumo: $total checagens, $fail reprovados, $pends pendentes"
-[ "$fail" -eq 0 ] || exit 1
+echo "Resumo: $((okc+noc+pdc)) checagens, ${noc} reprovados, ${pdc} pendentes"
+[ "$noc" -eq 0 ] && exit 0 || exit 1
