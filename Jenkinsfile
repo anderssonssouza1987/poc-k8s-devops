@@ -10,6 +10,7 @@ pipeline {
 
   environment {
     REGISTRY              = 'nexus:5001'
+    REGISTRY_PUSH         = 'localhost:5001'
     IMAGE_NAME            = 'poc-k8s-app'
     IMAGE_TAG             = "${BUILD_NUMBER}"
     NAMESPACE             = 'poc-k8s'
@@ -141,16 +142,20 @@ pipeline {
           sh '''
             set -eu
             IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            PUSH_IMAGE="${REGISTRY_PUSH}/${IMAGE_NAME}:${IMAGE_TAG}"
             test -f "${WS}/Dockerfile" || { echo "ERRO: Dockerfile nao encontrado na raiz do repo"; exit 1; }
-            echo "$NEXUS_PASS" | docker login "$REGISTRY" -u "$NEXUS_USER" --password-stdin
+            AUTH=$(printf '%s:%s' "$NEXUS_USER" "$NEXUS_PASS" | base64 -w0)
+            mkdir -p /root/.docker
+            printf '{"auths":{"%s":{"auth":"%s"},"%s":{"auth":"%s"}}}' \
+              "$REGISTRY_PUSH" "$AUTH" "$REGISTRY" "$AUTH" > /root/.docker/config.json
             docker build \
               -f "${WS}/Dockerfile" \
               --label "org.opencontainers.image.revision=${GIT_SHA}" \
               --label "org.opencontainers.image.version=${IMAGE_TAG}" \
-              -t "$IMAGE" \
+              -t "$PUSH_IMAGE" \
               "${WS}"
-            docker push "$IMAGE"
-            docker logout "$REGISTRY"
+            docker push "$PUSH_IMAGE"
+            docker logout "$REGISTRY_PUSH" || true
           '''
         }
       }
@@ -158,10 +163,15 @@ pipeline {
 
     stage('Trivy') {
       steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-docker',
+                                          usernameVariable: 'NEXUS_USER',
+                                          passwordVariable: 'NEXUS_PASS')]) {
         sh '''
           set -eu
           IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-          docker run --rm \
+          docker run --rm --network kind \
+            -e TRIVY_USERNAME="$NEXUS_USER" \
+            -e TRIVY_PASSWORD="$NEXUS_PASS" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${HOST_WS}:/work" -w /work \
             "${TRIVY_IMAGE}" image \
@@ -176,6 +186,7 @@ pipeline {
           echo "--- resumo do trivy ---"
           sed -n '1,40p' trivy-report.txt || true
         '''
+        }
       }
       post {
         always {
@@ -188,6 +199,7 @@ pipeline {
       steps {
         sh '''
           set -eu
+          kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f policies/disallow-latest-tag.yaml
           for i in $(seq 1 24); do
             if kubectl -n "${NAMESPACE}" run policy-probe --image=nginx:latest \
