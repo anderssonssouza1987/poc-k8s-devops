@@ -1,0 +1,67 @@
+== helm history ==
+REVISION	UPDATED                 	STATUS    	CHART            	APP VERSION	DESCRIPTION                                            
+4       	Fri Nov 20 03:03:01 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Rollback to 1                                          
+5       	Fri Nov 20 03:05:18 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+6       	Fri Nov 20 06:10:22 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+7       	Fri Nov 20 06:19:12 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+8       	Fri Nov 20 03:22:38 2026	failed    	poc-k8s-app-0.1.0	1.0.0      	Upgrade "poc-k8s-app" failed: context deadline exceeded
+9       	Fri Nov 20 03:23:39 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Rollback to 7                                          
+10      	Fri Nov 20 06:26:41 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+11      	Fri Nov 20 06:30:54 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+12      	Fri Nov 20 06:47:04 2026	superseded	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+13      	Fri Nov 20 06:52:21 2026	deployed  	poc-k8s-app-0.1.0	1.0.0      	Upgrade complete                                       
+== helm status ==
+NAME: poc-k8s-app
+LAST DEPLOYED: Fri Nov 20 06:52:21 2026
+NAMESPACE: poc-k8s
+STATUS: deployed
+REVISION: 13
+TEST SUITE: None
+== imagem ==
+nexus:5001/poc-k8s-app:20
+== annotations ==
+{"checksum/config":"493d0ecb5860f97fdcefdf1aacd96773032ea39a301d9e114a6645728feb1128","checksum/secret":"a2e6c47c19a115051963f7c8f06cc7eb0d6baccd43d37669c7b2e47da5bfdab9"}
+== servicemonitor ==
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  annotations:
+    meta.helm.sh/release-name: poc-k8s-app
+    meta.helm.sh/release-namespace: poc-k8s
+  creationTimestamp: "2026-11-20T06:52:22Z"
+  generation: 1
+  labels:
+    app.kubernetes.io/instance: poc-k8s-app
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: poc-k8s-app
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: poc-k8s-app-0.1.0
+    release: kube-prom
+  name: poc-k8s-app
+  namespace: poc-k8s
+  resourceVersion: "59075"
+  uid: 82d3797a-cc68-428d-8d6d-55c2a6d7b4ee
+spec:
+  endpoints:
+  - interval: 30s
+    path: /metrics
+    port: http
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - poc-k8s
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: poc-k8s-app
+      app.kubernetes.io/name: poc-k8s-app
+== nodes ==
+NAME                STATUS   ROLES           AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                       KERNEL-VERSION                              CONTAINER-RUNTIME
+poc-control-plane   Ready    control-plane   5h37m   v1.37.0   172.18.0.3    <none>        Debian GNU/Linux 13 (trixie)   6.18.33.2-microsoft-standard-WSL2 (amd64)   containerd://2.3.4
+poc-worker          Ready    <none>          5h37m   v1.37.0   172.18.0.2    <none>        Debian GNU/Linux 13 (trixie)   6.18.33.2-microsoft-standard-WSL2 (amd64)   containerd://2.3.4
+== releases observabilidade ==
+NAME       	NAMESPACE    	REVISION	UPDATED                                	STATUS  	CHART                       	APP VERSION
+kube-prom  	observability	5       	2026-11-20 02:13:00.040967091 -0300 -03	deployed	kube-prometheus-stack-93.4.1	v0.95.2    
+kyverno    	kyverno      	1       	2026-11-20 00:25:45.392557048 -0300 -03	deployed	kyverno-3.10.0              	v1.20.0    
+loki       	observability	1       	2026-11-20 02:02:08.813549114 -0300 -03	deployed	loki-7.7.0                  	3.6.20     
+poc-k8s-app	poc-k8s      	13      	2026-11-20 06:52:21.194275465 +0000 UTC	deployed	poc-k8s-app-0.1.0           	1.0.0      
+promtail   	observability	1       	2026-11-20 02:03:18.313816354 -0300 -03	deployed	promtail-6.17.1             	3.5.1      
