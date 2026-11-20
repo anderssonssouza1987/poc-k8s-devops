@@ -264,7 +264,7 @@ pipeline {
               --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
               --set image.tag="${IMAGE_TAG}" \
               --set imagePullSecrets[0].name=nexus-regcred \
-              --wait --timeout 5m
+              --wait --timeout 3m --atomic
 
             kubectl -n "${NAMESPACE}" rollout status "deploy/${RELEASE_NAME}" --timeout=180s
             kubectl -n "${NAMESPACE}" get pods,svc,ingress,hpa -o wide
