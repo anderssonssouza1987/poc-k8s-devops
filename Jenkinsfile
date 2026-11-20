@@ -17,7 +17,7 @@ pipeline {
     CHART_DIR     = 'helm/poc-k8s-app'
     SONAR_HOST    = 'http://sonarqube:9000'
     SONAR_PROJECT = 'poc-k8s-app'
-    HOST_WS       = "/srv/jenkins/workspace/${JOB_NAME}"
+    SCANNER_IMAGE = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
     KUBECONFIG    = '/root/.kube/config'
   }
 
@@ -28,7 +28,15 @@ pipeline {
         script {
           env.GIT_SHA    = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
           env.GIT_BRANCH = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+
+          env.HOST_WS = env.WORKSPACE.replace('/var/jenkins_home', '/srv/jenkins')
+          if (env.HOST_WS.contains('/var/jenkins_home')) {
+            error "HOST_WS nao foi traduzido para o caminho do host: ${env.HOST_WS}"
+          }
+
           echo "commit ${env.GIT_SHA} no branch ${env.GIT_BRANCH}"
+          echo "workspace container: ${env.WORKSPACE}"
+          echo "workspace host:      ${env.HOST_WS}"
         }
       }
     }
@@ -48,6 +56,8 @@ pipeline {
                 --cov-report=term-missing \
                 --junitxml=test-results.xml
             '
+          test -s "${HOST_WS}/app/test-results.xml" || { echo "ERRO: test-results.xml nao gerado"; exit 1; }
+          test -s "${HOST_WS}/app/coverage.xml"    || { echo "ERRO: coverage.xml nao gerado";    exit 1; }
         '''
       }
       post {
@@ -66,7 +76,7 @@ pipeline {
               -v "${HOST_WS}:/usr/src" -w /usr/src \
               -e SONAR_HOST_URL="${SONAR_HOST}" \
               -e SONAR_TOKEN="${SONAR_TOKEN}" \
-              sonarsource/sonar-scanner-cli:8.4.0.16527 \
+              "${SCANNER_IMAGE}" \
                 -Dsonar.projectKey="${SONAR_PROJECT}" \
                 -Dsonar.projectName="${SONAR_PROJECT}" \
                 -Dsonar.sources=app \
