@@ -4,3 +4,4 @@
 kubeconfig*
 .venv/
 __pycache__/
+*.bak.*
