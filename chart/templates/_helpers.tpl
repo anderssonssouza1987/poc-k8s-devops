@@ -1,20 +1,42 @@
 {{- define "poc-k8s-app.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
 {{- define "poc-k8s-app.fullname" -}}
-{{- printf "%s-%s" .Release.Name (include "poc-k8s-app.name" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "poc-k8s-app.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
 {{- define "poc-k8s-app.labels" -}}
-app.kubernetes.io/name: {{ include "poc-k8s-app.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+helm.sh/chart: {{ include "poc-k8s-app.chart" . }}
+{{ include "poc-k8s-app.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
-{{- end -}}
+{{- end }}
 
 {{- define "poc-k8s-app.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "poc-k8s-app.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-{{- end -}}
+{{- end }}
+
+{{- define "poc-k8s-app.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "poc-k8s-app.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}

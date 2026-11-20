@@ -1,25 +1,22 @@
-# ---- estagio 1: dependencias de execucao ----
-FROM python:3.12-slim AS deps
-ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
-WORKDIR /src
-COPY app/requirements.txt .
-RUN pip install --prefix=/install -r requirements.txt
+FROM python:3.12-slim
 
-# ---- estagio 2: testes ----
-FROM python:3.12-slim AS test
-ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
-WORKDIR /src
-COPY --from=deps /install /usr/local
-COPY app/ .
-RUN pip install pytest==8.3.4 && python -m pytest -q
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ---- estagio 3: runtime ----
-FROM python:3.12-slim AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN useradd --uid 10001 --create-home appuser
 WORKDIR /app
-COPY --from=deps /install /usr/local
-COPY --from=test /src/app.py /src/wsgi.py ./
-USER 10001
-EXPOSE 8080
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "wsgi:app"]
+
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
+
+COPY app/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./
+
+USER 10001:10001
+
+EXPOSE 8000
+
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", "wsgi:app"]

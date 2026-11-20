@@ -9,16 +9,17 @@ pipeline {
   }
 
   environment {
-    REGISTRY      = 'localhost:5001'
-    IMAGE_NAME    = 'poc-k8s-app'
-    IMAGE_TAG     = "${BUILD_NUMBER}"
-    NAMESPACE     = 'poc-k8s'
-    RELEASE_NAME  = 'poc-k8s-app'
-    CHART_DIR     = 'chart/poc-k8s-app'
-    SONAR_HOST    = 'http://sonarqube:9000'
-    SONAR_PROJECT = 'poc-k8s-app'
-    SCANNER_IMAGE = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
-    KUBECONFIG    = '/root/.kube/config'
+    REGISTRY        = 'localhost:5001'
+    IMAGE_NAME      = 'poc-k8s-app'
+    IMAGE_TAG       = "${BUILD_NUMBER}"
+    NAMESPACE       = 'poc-k8s'
+    RELEASE_NAME    = 'poc-k8s-app'
+    CHART_DIR       = 'chart'
+    SONAR_HOST      = 'http://sonarqube:9000'
+    SONAR_PROJECT   = 'poc-k8s-app'
+    SCANNER_IMAGE   = 'sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0'
+    TRIVY_EXIT_CODE = '1'
+    KUBECONFIG      = '/root/.kube/config'
   }
 
   stages {
@@ -47,7 +48,7 @@ pipeline {
         sh '''
           set -eu
           docker run --rm \
-            -v "${HOST_WS}:/src" -w /src \
+            -v "${HOST_WS}:/usr/src" -w /usr/src \
             python:3.12-slim sh -c '
               pip install -q -r app/requirements-dev.txt pytest-cov &&
               cd app &&
@@ -58,6 +59,7 @@ pipeline {
                 --junitxml=test-results.xml
             '
           ls -l "${WS}/app/test-results.xml" "${WS}/app/coverage.xml"
+          grep -o "<source>[^<]*</source>" "${WS}/app/coverage.xml" || true
           test -s "${WS}/app/test-results.xml" || { echo "ERRO: test-results.xml nao gerado"; exit 1; }
           test -s "${WS}/app/coverage.xml"    || { echo "ERRO: coverage.xml nao gerado";    exit 1; }
         '''
@@ -83,9 +85,10 @@ pipeline {
                 -Dsonar.projectName="${SONAR_PROJECT}" \
                 -Dsonar.sources=app \
                 -Dsonar.tests=app/tests \
-                -Dsonar.exclusions=app/tests/**,**/__pycache__/**,**/*.pyc \
+                -Dsonar.exclusions=app/tests/**,**/__pycache__/**,**/*.pyc,app/coverage.xml,app/test-results.xml \
                 -Dsonar.python.version=3.12 \
-                -Dsonar.python.coverage.reportPaths=app/coverage.xml
+                -Dsonar.python.coverage.reportPaths=app/coverage.xml \
+                -Dsonar.python.xunit.reportPath=app/test-results.xml
           '''
         }
       }
@@ -127,13 +130,15 @@ pipeline {
           sh '''
             set -eu
             IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            test -f "${WS}/Dockerfile" || { echo "ERRO: Dockerfile nao encontrado na raiz do repo"; exit 1; }
             echo "$NEXUS_PASS" | docker login "$REGISTRY" -u "$NEXUS_USER" --password-stdin
             docker build \
+              -f "${WS}/Dockerfile" \
               --label "org.opencontainers.image.revision=${GIT_SHA}" \
               --label "org.opencontainers.image.version=${IMAGE_TAG}" \
               -t "$IMAGE" \
               -t "${REGISTRY}/${IMAGE_NAME}:latest" \
-              "${HOST_WS}/app"
+              "${WS}"
             docker push "$IMAGE"
             docker push "${REGISTRY}/${IMAGE_NAME}:latest"
             docker logout "$REGISTRY"
@@ -155,7 +160,7 @@ pipeline {
               --ignore-unfixed \
               --format table \
               --output trivy-report.txt \
-              --exit-code 1 \
+              --exit-code "${TRIVY_EXIT_CODE}" \
               "$IMAGE"
         '''
       }
@@ -175,6 +180,12 @@ pipeline {
             set -eu
             IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
+            test -f "${CHART_DIR}/Chart.yaml" || { echo "ERRO: ${CHART_DIR}/Chart.yaml nao encontrado"; exit 1; }
+
+            helm lint "${CHART_DIR}" \
+              --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
+              --set image.tag="${IMAGE_TAG}"
+
             kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
             kubectl -n "${NAMESPACE}" create secret docker-registry nexus-regcred \
@@ -187,6 +198,7 @@ pipeline {
               --namespace "${NAMESPACE}" \
               --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
               --set image.tag="${IMAGE_TAG}" \
+              --set imagePullSecrets[0].name=nexus-regcred \
               > /tmp/rendered.yaml
 
             echo "--- manifesto renderizado (${RELEASE_NAME}) ---"
