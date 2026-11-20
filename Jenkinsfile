@@ -23,6 +23,7 @@ pipeline {
     TRIVY_EXIT_CODE       = '1'
     QG_REQUIRE_CONDITIONS = 'true'
     KUBECONFIG            = '/root/.kube/config'
+    PROM_STACK_RELEASE = 'kube-prom'
   }
 
   stages {
@@ -237,6 +238,12 @@ pipeline {
 
             test -f "${CHART_DIR}/Chart.yaml" || { echo "ERRO: ${CHART_DIR}/Chart.yaml nao encontrado"; exit 1; }
 
+            if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
+              SM_FLAG="--set serviceMonitor.enabled=true --set serviceMonitor.labels.release=${PROM_STACK_RELEASE}"
+            else
+              echo "AVISO: CRD ServiceMonitor ausente; observabilidade da app desabilitada"
+              SM_FLAG="--set serviceMonitor.enabled=false"
+            fi
             helm lint "${CHART_DIR}" \
               --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
               --set image.tag="${IMAGE_TAG}"
@@ -254,6 +261,7 @@ pipeline {
               --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
               --set image.tag="${IMAGE_TAG}" \
               --set imagePullSecrets[0].name=nexus-regcred \
+              ${SM_FLAG} \
               > /tmp/rendered.yaml
 
             echo "--- manifesto renderizado (${RELEASE_NAME}) ---"
@@ -264,6 +272,7 @@ pipeline {
               --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
               --set image.tag="${IMAGE_TAG}" \
               --set imagePullSecrets[0].name=nexus-regcred \
+              ${SM_FLAG} \
               --wait --timeout 3m --atomic
 
             kubectl -n "${NAMESPACE}" rollout status "deploy/${RELEASE_NAME}" --timeout=180s

@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: localhost:5001/poc-k8s-app
-  tag: latest
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -87,3 +87,11 @@ config:
 
 secret:
   appSecretKey: poc-placeholder
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  namespace: ""
+  labels: {}
