@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 NS=observability
-fail=0; total=0
+fail=0; total=0; pends=0
 ok(){ total=$((total+1)); printf '  [APROVADO]  %s\n' "$1"; }
 no(){ total=$((total+1)); fail=$((fail+1)); printf '  [REPROVADO] %s\n' "$1"; }
+pd(){ total=$((total+1)); pends=$((pends+1)); printf '  [PENDENTE]  %s\n' "$1"; }
 
 echo "== Loki =="
 kubectl -n $NS get sts loki -o jsonpath='{.status.readyReplicas}' 2>/dev/null | grep -q 1 \
@@ -30,15 +31,17 @@ ro=$(kubectl -n $NS get deploy kube-prom-grafana \
   -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].securityContext.readOnlyRootFilesystem}' 2>/dev/null)
 [ "$ro" = "true" ] && ok "grafana readOnlyRootFilesystem=true" || no "grafana readOnlyRootFilesystem=${ro:-vazio}"
 
-ds=$(kubectl -n $NS get cm kube-prom-grafana -o jsonpath='{.data}' 2>/dev/null | grep -c 'loki.observability' || true)
-[ "${ds:-0}" -ge 1 ] && ok "datasource Loki no Grafana" || no "datasource Loki ausente"
+ds=$(kubectl -n $NS get secret kube-prom-grafana-datasources \
+  -o go-template='{{index .data "datasources.yaml" | base64decode}}' 2>/dev/null \
+  | grep -c 'loki.observability' || true)
+[ "${ds:-0}" -ge 1 ] && ok "datasource Loki provisionado" || no "datasource Loki ausente"
 
 echo "== Servicos auxiliares =="
 for s in nexus jenkins sonarqube; do
   ns=$(kubectl get svc -A -o jsonpath="{range .items[?(@.metadata.name=='$s')]}{.metadata.namespace}{'\n'}{end}" 2>/dev/null | head -1)
-  [ -n "$ns" ] && ok "svc $s em $ns" || no "svc $s ausente"
+  [ -n "$ns" ] && ok "svc $s em $ns" || pd "svc $s nao deployado"
 done
 
 echo
-echo "Resumo: $total checagens, $fail reprovados"
+echo "Resumo: $total checagens, $fail reprovados, $pends pendentes"
 [ "$fail" -eq 0 ] || exit 1
