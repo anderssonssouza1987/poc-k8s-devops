@@ -172,7 +172,7 @@ pipeline {
           docker run --rm --network kind \
             -e TRIVY_USERNAME="$NEXUS_USER" \
             -e TRIVY_PASSWORD="$NEXUS_PASS" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/trivy -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${HOST_WS}:/work" -w /work \
             "${TRIVY_IMAGE}" image \
               --severity HIGH,CRITICAL \
