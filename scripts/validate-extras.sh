@@ -46,10 +46,13 @@ echo "== Politica Kyverno =="
 kubectl get validatingpolicy disallow-latest-tag >/dev/null 2>&1 \
   && ok "ValidatingPolicy disallow-latest-tag aplicada" || no "ValidatingPolicy ausente"
 
-if kubectl -n $APP run policy-probe --image=nginx:latest --dry-run=server -o yaml >/dev/null 2>&1; then
-  no "politica nao bloqueou :latest"
-else
+out=$(kubectl -n $APP run policy-probe --image=nginx:latest --dry-run=server -o yaml 2>&1 || true)
+if printf '%s' "$out" | grep -q 'disallow-latest-tag'; then
   ok "politica bloqueia :latest"
+elif printf '%s' "$out" | grep -q 'AlreadyExists'; then
+  no "probe colidiu com pod existente"
+else
+  no "politica nao bloqueou :latest"
 fi
 
 echo

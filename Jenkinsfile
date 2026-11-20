@@ -168,7 +168,7 @@ pipeline {
                                           passwordVariable: 'NEXUS_PASS')]) {
         sh '''
           set -eu
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE="${REGISTRY_PUSH}/${IMAGE_NAME}:${IMAGE_TAG}"
           docker run --rm --network kind \
             -e TRIVY_USERNAME="$NEXUS_USER" \
             -e TRIVY_PASSWORD="$NEXUS_PASS" \
@@ -178,6 +178,7 @@ pipeline {
               --severity HIGH,CRITICAL \
               --ignore-unfixed \
               --ignorefile /work/.trivyignore \
+              --image-src docker \
               --timeout 10m \
               --format table \
               --output trivy-report.txt \
@@ -202,11 +203,9 @@ pipeline {
           kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f policies/disallow-latest-tag.yaml
           for i in $(seq 1 24); do
-            if kubectl -n "${NAMESPACE}" run policy-probe --image=nginx:latest \
-                 --dry-run=server -o yaml >/tmp/probe.out 2>/tmp/probe.err; then
-              echo "tentativa ${i}: politica ainda nao bloqueou"
-              sleep 5
-            else
+            kubectl -n "${NAMESPACE}" run policy-probe --image=nginx:latest \
+              --dry-run=server -o yaml >/tmp/probe.out 2>/tmp/probe.err || true
+            if grep -q 'disallow-latest-tag' /tmp/probe.err; then
               echo "ok: :latest negado pelo admission"
               sed -n '1,6p' /tmp/probe.err
               kubectl -n "${NAMESPACE}" run policy-probe-ok --image=nginx:1.27.3 \
@@ -214,6 +213,12 @@ pipeline {
               echo "ok: tag imutavel aceita"
               exit 0
             fi
+            if grep -q 'AlreadyExists' /tmp/probe.err; then
+              echo "ERRO: probe colidiu com pod existente"
+              exit 1
+            fi
+            echo "tentativa ${i}: politica ainda nao bloqueou"
+            sleep 5
           done
           echo "ERRO: politica nao bloqueou :latest em 120s"
           exit 1
