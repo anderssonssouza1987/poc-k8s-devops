@@ -31,9 +31,8 @@ ro=$(kubectl -n $NS get deploy kube-prom-grafana \
   -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].securityContext.readOnlyRootFilesystem}' 2>/dev/null)
 [ "$ro" = "true" ] && ok "grafana readOnlyRootFilesystem=true" || no "grafana readOnlyRootFilesystem=${ro:-vazio}"
 
-ds=$(kubectl -n $NS get secret kube-prom-grafana-datasources \
-  -o go-template='{{index .data "datasources.yaml" | base64decode}}' 2>/dev/null \
-  | grep -c 'loki.observability' || true)
+ds=$(kubectl -n $NS get cm kube-prom-kube-prometheus-grafana-datasource \
+  -o jsonpath='{.data}' 2>/dev/null | grep -c 'loki.observability' || true)
 [ "${ds:-0}" -ge 1 ] && ok "datasource Loki provisionado" || no "datasource Loki ausente"
 
 echo "== Servicos auxiliares =="
